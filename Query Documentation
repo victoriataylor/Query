@@ -1,0 +1,150 @@
+***Query Design Spec***
+-------------------------
+
+In the following Design Module we describe the input, data flow, and output specification for the Query module. The pseudo code for the Query module is also given.
+
+(1) *Input*
+ 
+Parameter Input
+
+./Query [INDEX_FILE] [TARGET_DIRECTORY]
+
+Example command input
+
+query ../indexer/src/indexer.dat ../indexer/DIRECTORY 
+
+[INDEX_FILE] ../indexer/src/indexer.dat
+Requirement: The file must exist and be already created by the user.
+Usage: The Query informs the user if the file can not be found.
+
+[TARGET_DIRECTORY] ../indexer/DIRECTORY 
+Requirement: The Directory should already exist and contain the crawled files that the index file was constructed from. 
+Usage: Query informs the user if the file can not be found.
+
+
+Command Line Input
+
+Query takes input from the commandline until an EOF is reached (cntrl-d).
+The strings are queries, or searches for words that are found in the files in the TARGET_DIRECTORY.
+Operators such as AND and OR are used to make searches more specific.
+
+Example commandline input
+cat AND dog
+
+
+(2) *Output*
+--------------------
+Query will return the Document Id and URL of all files that contain the query. If there are no documents that fit the specifications it will inform the user and continue taking input.
+
+(3) *Data Flow*
+-------------------
+
+Input from the commandline will be taken in until the program recieves an EOF (cntrl-d). This input string will be parsed for words and for operators. The first word will be searched for in the Index. Its documentNodes will be copied and returned in a NewList. These words will be pushed into the WorkingList. For each subsequent word, its documntNodes will be retrieved as well. They will be ANDed into the WorkingList, meaning that the items on the WorkingList will be removed if they are not also found on the NewList. IF they are found on the newlist, then the frequency of the document in the NewList will be added to the freq of the doc in the WorkingList.
+
+When the operator OR is read in, the WorkingList will be pushed onto the FinalList. Then the WorkingList is cleared, and will continue to be added to in the previously mentioned AND fashion.
+
+Once query has parsed all the words, any DocumentNodes still on the WOrkingList are pushed to the FinalList.
+
+Query then checks to see if the FinalList is empty. If it is, no documents met the query. If not, the documents are sorted by frequency. For each documentNode, query finds their file in the TARGET_DIRECTORY and retrieves the URL on the first line. Each documents ID and URL is printed to stdout.
+
+
+(4) *Data Structures*
+---------------------
+
+Index: a Hashtable structure that contains pointers to WordNodes. Each WordNode contains a pointer to a word, a pointer to the next WordNode, and a pointer to a DocumentNode. Each DocumentNode contains a pointer to the next DocumentNode, and holds a doc_id and frequency.
+
+FinalList: a doubly-linked List of DocumentNodes that fit the requirements and will be returned to the user. DocumentNodes are only pushed to this list from the WorkingList after the operator OR or at the end of Input. 
+
+WorkingList: a List of DocumentNodes that fit the requirements SO FAR. As new words are AND'd some Documents may be removed because they are not found for both words. Once there is an OR, this list is pushed into the FinalList and the WorkingList is cleared.
+
+(5) *PseudoCode*
+--------------------
+1. Check commandline arguments
+	inform the user if there are too little or too many arguments
+	check to see if the target_directory and the Index File exists
+
+2. Initialize data structures
+	Create the Index
+
+3. Begin reading in input from standard input
+
+	4. Parse the Input
+		Get each word of the input in at a time
+
+		Check to make sure the first word is not "AND" or "OR"
+
+		If word is a regular word, AND it to the WorkingList
+
+		If the word is "AND" do nothing and go on
+
+		If the word is "OR" push the WorkingList onto the FinalList
+
+5. Once the Input is parsed, and the FinalList is complete, check to make sure the FinalLIst is not empty. If it is, inform the user that no queries match. If not, continue.
+
+6. Sort the DocumentNodes in the FinalList by frequency.
+
+7. Print out the URL and DocID of each of the docnodes
+
+8. Clear the Index
+
+10. Done.
+
+
+*** Query Implementation Spec**
+---------------------------------------
+(1) DATA STRUCTURES AND VARIABLES
+
+typedef struct DocumentNode {
+  struct DocumentNode *next;         // pointer to the next member of the list.
+  int doc_id;                        // document identifier
+  int freq;                          // number of occurrences of the word
+} DocumentNode;
+
+typedef struct WordNode {
+  struct WordNode *next;            // pointer to the next word (for collisions)
+  char *word;                       // the word
+  struct DocumentNode *page;               // pointer to the first element of the page list.
+} WordNode;
+
+typedef struct HashTable {
+    WordNode *table[MAX_HASH_SLOT];     // actual hashtable
+} HashTable;
+
+HashTable *Index;
+
+typedef struct List {
+	DocumentNode *head;
+	DocumentNode *tail;
+}
+
+(1) Prototype Definitions
+
+//HashTable Functions
+int addWord(char *w, int docId, HashTable *Index, int remakeFlag, int freq);
+	Adds a word to the Index, if it is not already in it, and records the docId and the freq. 
+	If the word is already in the Index, addWord finds where it is stored and compares DocIds with all the documents listed under the word. If a docId matches, then addWord increases the frequency with which that word is found in the document. If not, a new DocumentNode is created with a frequency of 1 and added to the list of that words DocumentNodes.
+
+
+#define MAX_HASH_SLOT 10000
+	Each Index we create has this many possible hashslots. 
+
+//Input Functions
+
+int ParseInput(char *input, HashTable *Index, List *FinalList)
+	Returns 1 if the string is successful, and returns 0 otherwise. Makes sure that no two operators are in a row. Gets DocumentNodes for each word and uses operator instructions to place them in a FinalList. 
+
+int ANDDocs(List *RunningList, List *NewDocList)
+	Takes two Lists of DocumentNodes. The first is the RunningList and the second is a new document list that will be compared it. For each document in the RunningList, the NewDocList is checked to see if it also contains the document. If it does, the score of the document in the NewDocList is added to the score of the document in the RunningList. If the document is not found in the NewDocList, then that DocumentNode is removed from the RunningList, and its space is freed. At the end, the NewDocList structure is freed.
+
+int ORDocs(List *FinalList, List *RunningList)
+	Function takes in the FinalList and the RunningList. For every Document in the
+	RunningList, it checks to see if the same document is already in the FinalList.If it is, it adds the two document frequencies and stores it in the FinalList DocumentNode. It then removes the corresponding RunningList node and frees it. If the document is not in the FinalList, the DocumentNode is removed from the RunningList and appended to the FinalList.
+
+List *CopyDocList(char *word, HashTable *Index)
+	Takes in a word and the Index. Searches for the word in the Index. If the word is not found in the Index, then NULL pointer is returned. If the word is in the Index, its DocumentNodes are copied into a new list of DocumentNodes, which is then returned to the user. The nodes are copied so that the original Index list is not altered.
+	
+Error/Test Conditions/Results
+------------------
+If the program is given an invalid directory it will quit and inform the user.
+
+If a file in the directory cannot be opened, the program will inform the user, exit use of that file, but continue to run and look at the other files.
